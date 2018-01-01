@@ -17,7 +17,8 @@ const cl::NDRange kernelRangeLocal(16, 16);
 #define kernelFile "src/pred.cl"
 #define kernelName "pred"
 
-static const std::string DUMP_FILE {"dump"};
+static const std::string DUMP_FILE     {"dump"};
+static const std::string DUMP_FILE1000 {"dump_after1000"};
 static const std::string DUMP_FILE_EXT {".yuv"};
 
 
@@ -116,6 +117,28 @@ int main(void)
             CL_QUEUE_PROFILING_ENABLE, //0,
             &err);
 
+        // dump
+        err |= queue.enqueueNDRangeKernel(
+            kernel,
+            cl::NullRange,
+            kernelRangeGlobal,
+            kernelRangeLocal,
+            NULL,
+            NULL);
+        cl::finish();
+        {
+            auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
+            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+
+            const auto file = DUMP_FILE + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
+            std::ofstream dump(file, std::ios::binary);
+            dump.write(reinterpret_cast<char*>(yPlane->data()), W * H);
+
+            yPlane->assign(yPlane->size(), 128);
+            dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
+            dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
+        }
+
         // warm up
         for (int i = 0; i < 128; ++i) {
             err |= queue.enqueueNDRangeKernel(
@@ -170,13 +193,13 @@ int main(void)
         << " [msec] / " << TIMES << " [times]"
         << std::endl;
 
-        // Dump
+        // Dump after 1000
         // --------------------------------------------
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
             err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
 
-            const auto file = DUMP_FILE + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
+            const auto file = DUMP_FILE1000 + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
             std::ofstream dump(file, std::ios::binary);
             dump.write(reinterpret_cast<char*>(yPlane->data()), W * H);
 

@@ -117,7 +117,7 @@ int main(void)
             &err);
 
         // warm up
-        for (int i = 0; i < 15; ++i) {
+        for (int i = 0; i < 128; ++i) {
             err |= queue.enqueueNDRangeKernel(
                 kernel,
                 cl::NullRange,
@@ -193,6 +193,10 @@ int main(void)
         << err.err()
         << ")"
         << std::endl;
+
+        if (err.err() == CL_BUILD_PROGRAM_FAILURE) {
+            // TODO: build error
+        }
     }
 
     return EXIT_SUCCESS;

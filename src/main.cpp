@@ -8,18 +8,20 @@
 #include <fstream>
 #include <streambuf>
 
-const size_t ch = 4;
-const size_t width = 1024;
-const size_t height = 1024 * 2;
+static const size_t W = 1024;
+static const size_t H = 1024;
 
-const cl::NDRange kernelRangeGlobal(width * height, 1);
-const cl::NDRange kernelRangeLocal(256,1);
+const cl::NDRange kernelRangeGlobal(W, H);
+const cl::NDRange kernelRangeLocal(16, 16);
 
 #define kernelFile "src/pred.cl"
-#define kernelName "mad1024"
+#define kernelName "pred"
 
-int
-main(void)
+static const std::string DUMP_FILE {"dump"};
+static const std::string DUMP_FILE_EXT {".yuv"};
+
+
+int main(void)
 {
     cl_int err = CL_SUCCESS;
     try {
@@ -105,12 +107,8 @@ main(void)
 
         // Execution
         // --------------------------------------------
-        cl::Buffer a(context, CL_MEM_READ_ONLY, width*ch*height);
-        cl::Buffer b(context, CL_MEM_READ_ONLY, width*ch*height);
-        cl::Buffer c(context, CL_MEM_WRITE_ONLY, width*ch*height);
-        err |= kernel.setArg(0, a);
-        err |= kernel.setArg(1, b);
-        err |= kernel.setArg(2, c);
+        cl::Buffer yPlaneDev(context, CL_MEM_READ_WRITE, W * H);
+        err |= kernel.setArg(0, yPlaneDev);
 
         cl::CommandQueue queue(
             context,
@@ -130,30 +128,62 @@ main(void)
         }
         cl::finish();
 
-        cl::Event event;
+        const int TIMES = 1000;
+        cl::Event eventStart;
+        cl::Event eventEnd;
         err |= queue.enqueueNDRangeKernel(
             kernel,
             cl::NullRange,
             kernelRangeGlobal,
             kernelRangeLocal,
             NULL,
-            &event);
-        err |= event.wait();
+            &eventStart);
+        for (int i = 0; i < TIMES - 2; ++i) {
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                NULL);
+        }
+        err |= queue.enqueueNDRangeKernel(
+            kernel,
+            cl::NullRange,
+            kernelRangeGlobal,
+            kernelRangeLocal,
+            NULL,
+            &eventEnd);
+        err |= eventEnd.wait();
 
         // Profiling
         // --------------------------------------------
         cl_ulong start;
         cl_ulong end;
-        err |= event.getProfilingInfo(CL_PROFILING_COMMAND_START, &start);
-        err |= event.getProfilingInfo(CL_PROFILING_COMMAND_END, &end);
+        err |= eventStart.getProfilingInfo(CL_PROFILING_COMMAND_START, &start);
+        err |= eventEnd.getProfilingInfo(CL_PROFILING_COMMAND_END, &end);
         std::cout
         << "Kernel "
         << kernelName
         << "(): "
-        << width * height * 1024 << " [mad], "
         << static_cast<double>(end - start) / 1000.0 / 1000.0
-        << " [msec]"
+        << " [msec] / " << TIMES << " [times]"
         << std::endl;
+
+        // Dump
+        // --------------------------------------------
+        {
+            auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
+            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+
+            const auto file = DUMP_FILE + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
+            std::ofstream dump(file, std::ios::binary);
+            dump.write(reinterpret_cast<char*>(yPlane->data()), W * H);
+
+            yPlane->assign(yPlane->size(), 128);
+            dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
+            dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
+        }
     }
     catch (cl::Error err) {
         std::cerr

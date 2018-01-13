@@ -20,15 +20,29 @@
 #define LH_SHIFT 4
 
 __kernel void pred(
-    __global uchar *yPlane
+    __global uchar *yPlane,
+    int xth
 )
 {
-    const int globalX = get_global_id(0);
+    //const int globalX = get_global_id(0);
     const int globalY = get_global_id(1);
-    const int groupX = get_group_id(0);
+    //const int groupX = get_group_id(0);
+    //const int lastGroupX = get_num_groups(0) - 1;
     const int groupY = get_group_id(1);
     const int localX = get_local_id(0);
     const int localY = get_local_id(1);
+
+    // -> xth
+    // grpY0(0<<1): 0 1 2 3 4 5 6 7 8 9
+    // grpY1(1<<1):     2 3 4
+    // grpY2(2<<1):         4 5 6
+    const int groupX = xth - (groupY << 1);
+    const int lastGroupX = (W >> LW_SHIFT) - 1;
+    const int globalX = (groupX << LW_SHIFT) + localX;
+    if (groupX < 0 || groupX > lastGroupX) {
+        return;
+    }
+
 
     __global uchar *pgroup = yPlane + W * LH * groupY + LW * groupX;
 
@@ -48,7 +62,7 @@ __kernel void pred(
                 p += 2;
                 add2110 = 1;
             }
-            if (localX == 3 && groupX == get_num_groups(0) - 1) {
+            if (localX == 3 && groupX == lastGroupX) {
                 p -= 2;
                 add2110 = 1;
             }

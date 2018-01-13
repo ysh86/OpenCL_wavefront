@@ -117,15 +117,23 @@ int main(void)
             CL_QUEUE_PROFILING_ENABLE, //0,
             &err);
 
-        // dump
-        err |= queue.enqueueNDRangeKernel(
-            kernel,
-            cl::NullRange,
-            kernelRangeGlobal,
-            kernelRangeLocal,
-            NULL,
-            NULL);
+        // -> xth
+        // 0(0<<1): 0 1 2 3 4 5 6 7 8 9
+        // 1(1<<1):     2 3 4
+        // 2(2<<1):         4 5 6
+        size_t nx = W / 16 + ((H / 16 - 1) * 2);
+        for (size_t xth = 0; xth < nx; xth++) {
+            err |= kernel.setArg(1, xth);
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                NULL);
+        }
         cl::finish();
+        // dump
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
             err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
@@ -151,9 +159,10 @@ int main(void)
         }
         cl::finish();
 
-        const int TIMES = 1000;
         cl::Event eventStart;
         cl::Event eventEnd;
+#if 0
+        const int TIMES = 1000;
         err |= queue.enqueueNDRangeKernel(
             kernel,
             cl::NullRange,
@@ -177,6 +186,37 @@ int main(void)
             kernelRangeLocal,
             NULL,
             &eventEnd);
+#else
+        const int TIMES = 10;
+        for (int i = 0; i < TIMES; i++) {
+            err |= kernel.setArg(1, 0);
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                (i == 0) ? &eventStart : NULL);
+            for (size_t xth = 1; xth < nx - 1; xth++) {
+                err |= kernel.setArg(1, xth);
+                err |= queue.enqueueNDRangeKernel(
+                    kernel,
+                    cl::NullRange,
+                    kernelRangeGlobal,
+                    kernelRangeLocal,
+                    NULL,
+                    NULL);
+            }
+            err |= kernel.setArg(1, nx - 1);
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                (i == TIMES - 1) ? &eventEnd : NULL);
+        }
+#endif
         err |= eventEnd.wait();
 
         // Profiling

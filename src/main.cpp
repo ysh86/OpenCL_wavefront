@@ -1,8 +1,11 @@
-#define __CL_ENABLE_EXCEPTIONS
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define CL_HPP_ENABLE_EXCEPTIONS
+#include <CL/cl2.hpp>
 
-#include <CL/cl.hpp>
 #include <cstdio>
 #include <cstdlib>
+
 #include <iostream>
 #include <string>
 #include <fstream>
@@ -98,10 +101,7 @@ int main(void)
         std::string kernelStr((std::istreambuf_iterator<char>(from)),
                                std::istreambuf_iterator<char>());
         from.close();
-        cl::Program::Sources sources(
-            1,
-            std::make_pair(kernelStr.c_str(), kernelStr.length())
-        );
+        cl::Program::Sources sources {kernelStr};
         cl::Program program_ = cl::Program(context, sources);
         err |= program_.build(devices);
         cl::Kernel kernel(program_, kernelName, &err);

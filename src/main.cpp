@@ -1,7 +1,20 @@
+#if 0
 #define CL_HPP_TARGET_OPENCL_VERSION 120
 #define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#else
+#define CL_HPP_TARGET_OPENCL_VERSION 200
+#define CL_HPP_MINIMUM_OPENCL_VERSION 200
+#endif
 #define CL_HPP_ENABLE_EXCEPTIONS
 #include <CL/cl2.hpp>
+#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+namespace cl {
+    namespace detail {
+        CL_HPP_DECLARE_PARAM_TRAITS_(cl_device_info, CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE, size_t)
+        CL_HPP_DECLARE_PARAM_TRAITS_(cl_device_info, CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE, size_t)
+    }
+}
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,7 +27,7 @@
 #include <fstream>
 #include <streambuf>
 
-static const size_t PLATFORM_INDEX = 0;
+static const size_t PLATFORM_INDEX = 1;
 
 static const size_t W = 1024;
 static const size_t H = 1024;
@@ -91,9 +104,15 @@ int main(void)
                 device.getInfo<CL_DRIVER_VERSION>(),
                 device.getInfo<CL_DEVICE_OPENCL_C_VERSION>(),
                 std::to_string(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) + "[Cores] @ " + std::to_string(device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>()) + "[MHz]",
+#if CL_HPP_TARGET_OPENCL_VERSION < 200
                 "Host Unified Memory: " + std::to_string(device.getInfo<CL_DEVICE_HOST_UNIFIED_MEMORY>()),
-                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::string{"?"},//std::to_string(device.getInfo<CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE>()),
-                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::string{"?"},//std::to_string(device.getInfo<CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE>()),
+                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::string{ "?" },
+                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::string{ "?" },
+#else
+                "Host Unified Memory: " + std::string{ "?" },
+                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::to_string(device.getInfo<CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE>()),
+                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::to_string(device.getInfo<CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE>()),
+#endif
                 device.getInfo<CL_DEVICE_EXTENSIONS>(),
             }};
             for (auto &param : params) {
@@ -141,8 +160,8 @@ int main(void)
             return EXIT_FAILURE;
         }
 
-        auto kernel = cl::KernelFunctor<cl::Buffer, int>(program, kernelName);
-        auto k = kernel.getKernel();
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, int>(program, kernelName);
+        auto k = kernelFunc.getKernel();
         size_t s = k.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
@@ -153,7 +172,7 @@ int main(void)
         cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
         size_t nx = W / 16 + ((H / 16 - 1) * 2);
         for (size_t xth = 0; xth < nx; xth++) {
-            kernel(
+            kernelFunc(
                 cl::EnqueueArgs(
                     kernelRangeGlobal,
                     kernelRangeLocal
@@ -180,7 +199,7 @@ int main(void)
 
         // warm up
         for (int i = 0; i < 128; ++i) {
-            kernel(
+            kernelFunc(
                 cl::EnqueueArgs(
                     kernelRangeGlobal,
                     kernelRangeLocal
@@ -197,7 +216,7 @@ int main(void)
 #if 0
         const int TIMES = 1000;
         for (int i = 0; i < TIMES; i++) {
-            cl::Event ev = kernel(
+            cl::Event ev = kernelFunc(
                 cl::EnqueueArgs(
                     kernelRangeGlobal,
                     kernelRangeLocal
@@ -216,7 +235,7 @@ int main(void)
         const int TIMES = 10;
         for (int i = 0; i < TIMES; i++) {
             for (size_t xth = 0; xth < nx; xth++) {
-                cl::Event ev = kernel(
+                cl::Event ev = kernelFunc(
                     cl::EnqueueArgs(
                         kernelRangeGlobal,
                         kernelRangeLocal

@@ -6,10 +6,15 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include <iostream>
 #include <string>
+#include <array>
+#include <vector>
+#include <memory>
+#include <iostream>
 #include <fstream>
 #include <streambuf>
+
+static const size_t PLATFORM_INDEX = 0;
 
 static const size_t W = 1024;
 static const size_t H = 1024;
@@ -29,71 +34,74 @@ int main(void)
 {
     cl_int err = CL_SUCCESS;
     try {
-        // Platform
+        // Platforms & Context
         // --------------------------------------------
-        std::cout << "Platform" << std::endl;
+        std::cout << "=======================================" << std::endl;
+        std::cout << "Platforms" << std::endl;
         std::cout << "=======================================" << std::endl;
         std::vector<cl::Platform> platforms;
         err |= cl::Platform::get(&platforms);
-        size_t n = platforms.size();
-        for (size_t i = 0; i < n; i++) {
-            std::cout << i << std::endl;
-            std::cout << "---------------------------------------" << std::endl;
-
-            static const int names[] = {
-                CL_PLATFORM_PROFILE,
-                CL_PLATFORM_VERSION,
-                CL_PLATFORM_NAME,
-                CL_PLATFORM_VENDOR,
-                CL_PLATFORM_EXTENSIONS,
-            };
-            int n_names = sizeof(names) / sizeof(names[0]);
-            for (int j = 0; j < n_names; j++) {
-                std::string param;
-                err |= platforms[i].getInfo(names[j], &param);
+        for (auto &plat : platforms) {
+            std::array<std::string, 5> params {{
+                plat.getInfo<CL_PLATFORM_PROFILE>(),
+                plat.getInfo<CL_PLATFORM_VERSION>(),
+                plat.getInfo<CL_PLATFORM_NAME>(),
+                plat.getInfo<CL_PLATFORM_VENDOR>(),
+                plat.getInfo<CL_PLATFORM_EXTENSIONS>(),
+            }};
+            for (auto &param : params) {
                 std::cout << param << std::endl;
             }
-        }
-        if (n == 0) {
-            std::cout << "Platform size 0\n";
-            return -1;
-        }
 
+            std::cout << "--------------------" << std::endl;
+        }
+        if (platforms.size() == 0 || PLATFORM_INDEX >= platforms.size()) {
+            std::cout << "ERROR: No platforms" << std::endl;
+            return EXIT_FAILURE;
+        }
+        std::cout << std::endl;
+
+        cl::Platform plat = cl::Platform::setDefault(platforms[PLATFORM_INDEX]);
+        if (plat != platforms[PLATFORM_INDEX]) {
+            std::cerr << "ERROR: Setting default platform: " << PLATFORM_INDEX << std::endl;
+            return EXIT_FAILURE;
+        }
+        std::cout << "Use platform " << PLATFORM_INDEX << std::endl;
+        std::cout << std::endl;
         // Context
-        // --------------------------------------------
-        cl_context_properties properties[] = {
-            CL_CONTEXT_PLATFORM,
-            (cl_context_properties)(platforms[0])(),
-            0
-        };
-        cl::Context context(CL_DEVICE_TYPE_GPU, properties);
+        cl::Context context = cl::Context::getDefault();
 
-        // Device
+        // Devices
         // --------------------------------------------
-        std::cout << "Device" << std::endl;
         std::cout << "=======================================" << std::endl;
-        std::vector<cl::Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
-        size_t n_dev = devices.size();
-        for (size_t i = 0; i < n_dev; i++) {
+        std::cout << "Devices" << std::endl;
+        std::cout << "=======================================" << std::endl;
+        auto devices = context.getInfo<CL_CONTEXT_DEVICES>();
+        size_t i = 0;
+        for (auto &device : devices) {
+            std::cout << "--------------------" << std::endl;
             std::cout << i << std::endl;
-            std::cout << "---------------------------------------" << std::endl;
+            std::cout << "--------------------" << std::endl;
 
-            static const int names[] = {
-                CL_DEVICE_NAME,
-                CL_DEVICE_VENDOR,
-                CL_DEVICE_PROFILE,
-                CL_DEVICE_VERSION,
-                CL_DRIVER_VERSION,
-                CL_DEVICE_OPENCL_C_VERSION,
-                CL_DEVICE_EXTENSIONS,
-            };
-            int n_names = sizeof(names) / sizeof(names[0]);
-            for (int j = 0; j < n_names; j++) {
-                std::string param;
-                err |= devices[i].getInfo(names[j], &param);
+            std::array<std::string, 11> params {{
+                device.getInfo<CL_DEVICE_NAME>(),
+                device.getInfo<CL_DEVICE_VENDOR>(),
+                device.getInfo<CL_DEVICE_PROFILE>(),
+                device.getInfo<CL_DEVICE_VERSION>(),
+                device.getInfo<CL_DRIVER_VERSION>(),
+                device.getInfo<CL_DEVICE_OPENCL_C_VERSION>(),
+                std::to_string(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) + "[Cores] @ " + std::to_string(device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>()) + "[MHz]",
+                "Host Unified Memory: " + std::to_string(device.getInfo<CL_DEVICE_HOST_UNIFIED_MEMORY>()),
+                "CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE: " + std::string{"?"},//std::to_string(device.getInfo<CL_DEVICE_MAX_GLOBAL_VARIABLE_SIZE>()),
+                "CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE: " + std::string{"?"},//std::to_string(device.getInfo<CL_DEVICE_GLOBAL_VARIABLE_PREFERRED_TOTAL_SIZE>()),
+                device.getInfo<CL_DEVICE_EXTENSIONS>(),
+            }};
+            for (auto &param : params) {
                 std::cout << param << std::endl;
             }
+            ++i;
         }
+        std::cout << std::endl;
 
         // Build
         // --------------------------------------------
@@ -102,41 +110,64 @@ int main(void)
                                std::istreambuf_iterator<char>());
         from.close();
         cl::Program::Sources sources {kernelStr};
-        cl::Program program_ = cl::Program(context, sources);
-        err |= program_.build(devices);
-        cl::Kernel kernel(program_, kernelName, &err);
+        cl::Program program = cl::Program(sources);
+        try {
+            err |= program.build("");
+        } catch (cl::Error err) {
+            std::cerr
+            << "ERROR: "
+            << err.what()
+            << "("
+            << err.err()
+            << ")"
+            << std::endl;
+
+            cl_int buildErr = CL_SUCCESS;
+            auto buildInfo = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(&buildErr);
+            for (auto &pair : buildInfo) {
+                std::cerr << pair.second << std::endl;
+            }
+            return EXIT_FAILURE;
+        }
 
         // Execution
         // --------------------------------------------
-        cl::Buffer yPlaneDev(context, CL_MEM_READ_WRITE, W * H);
-        err |= kernel.setArg(0, yPlaneDev);
-
         cl::CommandQueue queue(
-            context,
-            devices[0],
-            CL_QUEUE_PROFILING_ENABLE, //0,
-            &err);
+            cl::QueueProperties::Profiling //cl::QueueProperties::None
+        );
+        cl::CommandQueue q = cl::CommandQueue::setDefault(queue);
+        if (q != queue) {
+            std::cerr << "ERROR: Setting default queue" << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        auto kernel = cl::KernelFunctor<cl::Buffer, int>(program, kernelName);
+        auto k = kernel.getKernel();
+        size_t s = k.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
+        std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
         // -> xth
         // 0(0<<1): 0 1 2 3 4 5 6 7 8 9
         // 1(1<<1):     2 3 4
         // 2(2<<1):         4 5 6
+        cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
         size_t nx = W / 16 + ((H / 16 - 1) * 2);
         for (size_t xth = 0; xth < nx; xth++) {
-            err |= kernel.setArg(1, xth);
-            err |= queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                kernelRangeGlobal,
-                kernelRangeLocal,
-                NULL,
-                NULL);
+            kernel(
+                cl::EnqueueArgs(
+                    kernelRangeGlobal,
+                    kernelRangeLocal
+                ),
+                yPlaneDev,
+                xth,
+                err
+            );
         }
         cl::finish();
         // dump
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
-            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+            err |= cl::copy(yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
 
             const auto file = DUMP_FILE + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
             std::ofstream dump(file, std::ios::binary);
@@ -149,13 +180,15 @@ int main(void)
 
         // warm up
         for (int i = 0; i < 128; ++i) {
-            err |= queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                kernelRangeGlobal,
-                kernelRangeLocal,
-                NULL,
-                NULL);
+            kernel(
+                cl::EnqueueArgs(
+                    kernelRangeGlobal,
+                    kernelRangeLocal
+                ),
+                yPlaneDev,
+                0,
+                err
+            );
         }
         cl::finish();
 
@@ -163,58 +196,41 @@ int main(void)
         cl::Event eventEnd;
 #if 0
         const int TIMES = 1000;
-        err |= queue.enqueueNDRangeKernel(
-            kernel,
-            cl::NullRange,
-            kernelRangeGlobal,
-            kernelRangeLocal,
-            NULL,
-            &eventStart);
-        for (int i = 0; i < TIMES - 2; ++i) {
-            err |= queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                kernelRangeGlobal,
-                kernelRangeLocal,
-                NULL,
-                NULL);
+        for (int i = 0; i < TIMES; i++) {
+            cl::Event ev = kernel(
+                cl::EnqueueArgs(
+                    kernelRangeGlobal,
+                    kernelRangeLocal
+                ),
+                yPlaneDev,
+                0,
+                err
+            );
+            if (i == 0) {
+                eventStart = ev;
+            } else if (i == TIMES - 1) {
+                eventEnd = ev;
+            }
         }
-        err |= queue.enqueueNDRangeKernel(
-            kernel,
-            cl::NullRange,
-            kernelRangeGlobal,
-            kernelRangeLocal,
-            NULL,
-            &eventEnd);
 #else
         const int TIMES = 10;
         for (int i = 0; i < TIMES; i++) {
-            err |= kernel.setArg(1, 0);
-            err |= queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                kernelRangeGlobal,
-                kernelRangeLocal,
-                NULL,
-                (i == 0) ? &eventStart : NULL);
-            for (size_t xth = 1; xth < nx - 1; xth++) {
-                err |= kernel.setArg(1, xth);
-                err |= queue.enqueueNDRangeKernel(
-                    kernel,
-                    cl::NullRange,
-                    kernelRangeGlobal,
-                    kernelRangeLocal,
-                    NULL,
-                    NULL);
+            for (size_t xth = 0; xth < nx; xth++) {
+                cl::Event ev = kernel(
+                    cl::EnqueueArgs(
+                        kernelRangeGlobal,
+                        kernelRangeLocal
+                    ),
+                    yPlaneDev,
+                    xth,
+                    err
+                );
+                if (i == 0 && xth == 0) {
+                    eventStart = ev;
+                } else if (i == TIMES - 1 && xth == nx - 1) {
+                    eventEnd = ev;
+                }
             }
-            err |= kernel.setArg(1, nx - 1);
-            err |= queue.enqueueNDRangeKernel(
-                kernel,
-                cl::NullRange,
-                kernelRangeGlobal,
-                kernelRangeLocal,
-                NULL,
-                (i == TIMES - 1) ? &eventEnd : NULL);
         }
 #endif
         err |= eventEnd.wait();
@@ -237,7 +253,7 @@ int main(void)
         // --------------------------------------------
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
-            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+            err |= cl::copy(yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
 
             const auto file = DUMP_FILE1000 + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
             std::ofstream dump(file, std::ios::binary);
@@ -256,10 +272,6 @@ int main(void)
         << err.err()
         << ")"
         << std::endl;
-
-        if (err.err() == CL_BUILD_PROGRAM_FAILURE) {
-            // TODO: build error
-        }
     }
 
     return EXIT_SUCCESS;

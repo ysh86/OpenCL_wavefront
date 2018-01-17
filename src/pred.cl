@@ -21,24 +21,27 @@
 
 __kernel void pred(
     __global uchar *yPlane,
-    int xth
+    int xth,
+    int offsetY
 )
 {
-    //const int globalX = get_global_id(0);
-    const int globalY = get_global_id(1);
+    /*const*/ int globalX = get_global_id(0);
+    /*const*/ int globalY = get_global_id(1);
     //const int groupX = get_group_id(0);
     //const int lastGroupX = get_num_groups(0) - 1;
-    const int groupY = get_group_id(1);
+    /*const*/ int groupY = get_group_id(1);
     const int localX = get_local_id(0);
     const int localY = get_local_id(1);
 
     // -> xth
-    // grpY0(0<<1): 0 1 2 3 4 5 6 7 8 9
-    // grpY1(1<<1):     2 3 4
-    // grpY2(2<<1):         4 5 6
+    // grpY0(0<<1): 0 1 2 3 4 5 6 7
+    // grpY1(1<<1):     2 3 4 5 6 7 8 9
+    // grpY2(2<<1):         4 5 6 7 8 9 10 11
+    globalY += offsetY << LH_SHIFT;
+    groupY += offsetY;
     const int groupX = xth - (groupY << 1);
     const int lastGroupX = (W >> LW_SHIFT) - 1;
-    const int globalX = (groupX << LW_SHIFT) + localX;
+    globalX += groupX << LW_SHIFT;
     if (groupX < 0 || groupX > lastGroupX) {
         return;
     }

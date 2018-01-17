@@ -41,7 +41,7 @@ static const size_t H = 1024;
 #if SYNC_ON_DEV
 const cl::NDRange kernelRangeGlobal(W, H);
 #else
-const cl::NDRange kernelRangeGlobal(16, H);
+cl::NDRange kernelRangeGlobal(16, 16);
 #endif
 const cl::NDRange kernelRangeLocal(16, 16);
 
@@ -170,7 +170,7 @@ int main(void)
             return EXIT_FAILURE;
         }
 
-        auto kernelFunc = cl::KernelFunctor<cl::Buffer, int>(program, kernelName);
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, int, int>(program, kernelName);
         auto kernel = kernelFunc.getKernel();
         size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
@@ -178,6 +178,7 @@ int main(void)
         cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
 #if SYNC_ON_DEV
         // Sync on Dev
+        kernelRangeGlobal.get()[1] = H;
         kernelFunc(
             cl::EnqueueArgs(
                 kernelRangeGlobal,
@@ -185,16 +186,21 @@ int main(void)
             ),
             yPlaneDev,
             0,
+            0,
             err
         );
 #else
         // Sync on Host
         // -> xth
-        // 0(0<<1): 0 1 2 3 4 5 6 7 8 9
-        // 1(1<<1):     2 3 4
-        // 2(2<<1):         4 5 6
+        // 0(0<<1): 0 1 2 3 4 5 6 7
+        // 1(1<<1):     2 3 4 5 6 7 8 9
+        // 2(2<<1):         4 5 6 7 8 9 10 11
         size_t nx = W / 16 + ((H / 16 - 1) * 2);
         for (size_t xth = 0; xth < nx; xth++) {
+            size_t offsetY = (xth < W / 16) ? 0 : (xth - W / 16) / 2 + 1;
+            size_t ny = (xth >> 1) + 1;
+            ny = (ny < H / 16) ? ny - offsetY : H / 16 - offsetY;
+            kernelRangeGlobal.get()[1] = ny * 16;
             kernelFunc(
                 cl::EnqueueArgs(
                     kernelRangeGlobal,
@@ -202,6 +208,7 @@ int main(void)
                 ),
                 yPlaneDev,
                 static_cast<int>(xth),
+                static_cast<int>(offsetY),
                 err
             );
         }
@@ -226,6 +233,8 @@ int main(void)
         // warm up
         err |= kernel.setArg(0, yPlaneDev);
         err |= kernel.setArg(1, 0);
+        err |= kernel.setArg(2, 0);
+        kernelRangeGlobal.get()[1] = 16;
         for (int i = 0; i < 128; ++i) {
             err |= queue.enqueueNDRangeKernel(
                 kernel,
@@ -241,9 +250,10 @@ int main(void)
         // use cl::Kernel for performance!
         cl::Event eventStart;
         cl::Event eventEnd;
+        const int TIMES = 1000;
 #if SYNC_ON_DEV
         // Sync on Dev
-        const int TIMES = 1000;
+        kernelRangeGlobal.get()[1] = H;
         for (int i = 0; i < TIMES; i++) {
             err |= queue.enqueueNDRangeKernel(
                 kernel,
@@ -256,10 +266,14 @@ int main(void)
         }
 #else
         // Sync on Host
-        const int TIMES = 10;
         for (int i = 0; i < TIMES; i++) {
             for (size_t xth = 0; xth < nx; xth++) {
+                size_t offsetY = (xth < W / 16) ? 0 : (xth - W / 16) / 2 + 1;
+                size_t ny = (xth >> 1) + 1;
+                ny = (ny < H / 16) ? ny - offsetY : H / 16 - offsetY;
+                kernelRangeGlobal.get()[1] = ny * 16;
                 err |= kernel.setArg(1, static_cast<int>(xth));
+                err |= kernel.setArg(2, static_cast<int>(offsetY));
                 err |= queue.enqueueNDRangeKernel(
                     kernel,
                     cl::NullRange,

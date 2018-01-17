@@ -1,9 +1,11 @@
 #if 0
 #define CL_HPP_TARGET_OPENCL_VERSION 120
 #define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define SYNC_ON_DEV 0
 #else
 #define CL_HPP_TARGET_OPENCL_VERSION 200
 #define CL_HPP_MINIMUM_OPENCL_VERSION 200
+#define SYNC_ON_DEV 0
 #endif
 #define CL_HPP_ENABLE_EXCEPTIONS
 #include <CL/cl2.hpp>
@@ -32,7 +34,11 @@ static const size_t PLATFORM_INDEX = 1;
 static const size_t W = 1024;
 static const size_t H = 1024;
 
+#if SYNC_ON_DEV
 const cl::NDRange kernelRangeGlobal(W, H);
+#else
+const cl::NDRange kernelRangeGlobal(16, H);
+#endif
 const cl::NDRange kernelRangeLocal(16, 16);
 
 #define kernelFile "src/pred.cl"
@@ -165,11 +171,24 @@ int main(void)
         size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
+        cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
+#if SYNC_ON_DEV
+        // Sync on Dev
+        kernelFunc(
+            cl::EnqueueArgs(
+                kernelRangeGlobal,
+                kernelRangeLocal
+            ),
+            yPlaneDev,
+            0,
+            err
+        );
+#else
+        // Sync on Host
         // -> xth
         // 0(0<<1): 0 1 2 3 4 5 6 7 8 9
         // 1(1<<1):     2 3 4
         // 2(2<<1):         4 5 6
-        cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
         size_t nx = W / 16 + ((H / 16 - 1) * 2);
         for (size_t xth = 0; xth < nx; xth++) {
             kernelFunc(
@@ -182,6 +201,7 @@ int main(void)
                 err
             );
         }
+#endif
         cl::finish();
         // dump
         {
@@ -217,7 +237,8 @@ int main(void)
         // use cl::Kernel for performance!
         cl::Event eventStart;
         cl::Event eventEnd;
-#if 0
+#if SYNC_ON_DEV
+        // Sync on Dev
         const int TIMES = 1000;
         for (int i = 0; i < TIMES; i++) {
             err |= queue.enqueueNDRangeKernel(
@@ -230,6 +251,7 @@ int main(void)
             );
         }
 #else
+        // Sync on Host
         const int TIMES = 10;
         for (int i = 0; i < TIMES; i++) {
             for (size_t xth = 0; xth < nx; xth++) {

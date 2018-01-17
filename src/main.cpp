@@ -161,8 +161,8 @@ int main(void)
         }
 
         auto kernelFunc = cl::KernelFunctor<cl::Buffer, int>(program, kernelName);
-        auto k = kernelFunc.getKernel();
-        size_t s = k.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
+        auto kernel = kernelFunc.getKernel();
+        size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
         // -> xth
@@ -178,7 +178,7 @@ int main(void)
                     kernelRangeLocal
                 ),
                 yPlaneDev,
-                xth,
+                static_cast<int>(xth),
                 err
             );
         }
@@ -197,65 +197,56 @@ int main(void)
             dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
         }
 
+        // Profiling
+        // --------------------------------------------
         // warm up
+        err |= kernel.setArg(0, yPlaneDev);
+        err |= kernel.setArg(1, 0);
         for (int i = 0; i < 128; ++i) {
-            kernelFunc(
-                cl::EnqueueArgs(
-                    kernelRangeGlobal,
-                    kernelRangeLocal
-                ),
-                yPlaneDev,
-                0,
-                err
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                NULL
             );
         }
         cl::finish();
 
+        // use cl::Kernel for performance!
         cl::Event eventStart;
         cl::Event eventEnd;
 #if 0
         const int TIMES = 1000;
         for (int i = 0; i < TIMES; i++) {
-            cl::Event ev = kernelFunc(
-                cl::EnqueueArgs(
-                    kernelRangeGlobal,
-                    kernelRangeLocal
-                ),
-                yPlaneDev,
-                0,
-                err
+            err |= queue.enqueueNDRangeKernel(
+                kernel,
+                cl::NullRange,
+                kernelRangeGlobal,
+                kernelRangeLocal,
+                NULL,
+                (i == 0) ? &eventStart : ((i == TIMES - 1) ? &eventEnd : NULL)
             );
-            if (i == 0) {
-                eventStart = ev;
-            } else if (i == TIMES - 1) {
-                eventEnd = ev;
-            }
         }
 #else
         const int TIMES = 10;
         for (int i = 0; i < TIMES; i++) {
             for (size_t xth = 0; xth < nx; xth++) {
-                cl::Event ev = kernelFunc(
-                    cl::EnqueueArgs(
-                        kernelRangeGlobal,
-                        kernelRangeLocal
-                    ),
-                    yPlaneDev,
-                    xth,
-                    err
+                err |= kernel.setArg(1, static_cast<int>(xth));
+                err |= queue.enqueueNDRangeKernel(
+                    kernel,
+                    cl::NullRange,
+                    kernelRangeGlobal,
+                    kernelRangeLocal,
+                    NULL,
+                    (i == 0 && xth == 0) ? &eventStart : ((i == TIMES - 1 && xth == nx - 1) ? &eventEnd : NULL)
                 );
-                if (i == 0 && xth == 0) {
-                    eventStart = ev;
-                } else if (i == TIMES - 1 && xth == nx - 1) {
-                    eventEnd = ev;
-                }
             }
         }
 #endif
         err |= eventEnd.wait();
 
-        // Profiling
-        // --------------------------------------------
         cl_ulong start;
         cl_ulong end;
         err |= eventStart.getProfilingInfo(CL_PROFILING_COMMAND_START, &start);

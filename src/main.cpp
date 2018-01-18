@@ -1,11 +1,11 @@
 #if 0
 #define CL_HPP_TARGET_OPENCL_VERSION 120
 #define CL_HPP_MINIMUM_OPENCL_VERSION 120
-#define SYNC_ON_DEV 0
+#define SYNC_ON_DEV 1
 #else
 #define CL_HPP_TARGET_OPENCL_VERSION 200
 #define CL_HPP_MINIMUM_OPENCL_VERSION 200
-#define SYNC_ON_DEV 0
+#define SYNC_ON_DEV 1
 #endif
 #define CL_HPP_ENABLE_EXCEPTIONS
 #include <CL/cl2.hpp>
@@ -170,7 +170,11 @@ int main(void)
             return EXIT_FAILURE;
         }
 
+#if SYNC_ON_DEV
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer>(program, kernelName);
+#else
         auto kernelFunc = cl::KernelFunctor<cl::Buffer, int, int>(program, kernelName);
+#endif
         auto kernel = kernelFunc.getKernel();
         size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
@@ -178,15 +182,17 @@ int main(void)
         cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
 #if SYNC_ON_DEV
         // Sync on Dev
-        kernelRangeGlobal.get()[1] = H;
+        const size_t condsSize = sizeof(int32_t) * (W / 16) * (H / 16);
+        cl::Buffer condsDev(CL_MEM_READ_WRITE, condsSize);
+        const uint8_t patternZero = 0;
+        err |= queue.enqueueFillBuffer(condsDev, patternZero, 0, condsSize, NULL, NULL);
         kernelFunc(
             cl::EnqueueArgs(
                 kernelRangeGlobal,
                 kernelRangeLocal
             ),
             yPlaneDev,
-            0,
-            0,
+            condsDev,
             err
         );
 #else
@@ -232,9 +238,12 @@ int main(void)
         // --------------------------------------------
         // warm up
         err |= kernel.setArg(0, yPlaneDev);
+#if SYNC_ON_DEV
+        err |= kernel.setArg(1, condsDev);
+#else
         err |= kernel.setArg(1, 0);
         err |= kernel.setArg(2, 0);
-        kernelRangeGlobal.get()[1] = 16;
+#endif
         for (int i = 0; i < 128; ++i) {
             err |= queue.enqueueNDRangeKernel(
                 kernel,
@@ -253,8 +262,15 @@ int main(void)
         const int TIMES = 1000;
 #if SYNC_ON_DEV
         // Sync on Dev
-        kernelRangeGlobal.get()[1] = H;
         for (int i = 0; i < TIMES; i++) {
+            err |= queue.enqueueFillBuffer(
+                condsDev,
+                patternZero,
+                0,
+                condsSize,
+                NULL,
+                /*(i == 0) ? &eventStart :*/ NULL // TODO: ???
+            );
             err |= queue.enqueueNDRangeKernel(
                 kernel,
                 cl::NullRange,

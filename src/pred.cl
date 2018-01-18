@@ -12,6 +12,10 @@
 // ---+----+
 //
 
+#define SYNC_ON_DEV 1
+
+#define NULL 0
+
 #define W 1024
 #define H 1024
 #define LW 16
@@ -21,10 +25,54 @@
 
 __kernel void pred(
     __global uchar *yPlane,
+#if SYNC_ON_DEV
+    volatile __global int *conds
+#else
     int xth,
     int offsetY
+#endif
 )
 {
+#if SYNC_ON_DEV
+    const int globalX = get_global_id(0);
+    const int globalY = get_global_id(1);
+    const int groupX = get_group_id(0);
+    const int lastGroupX = get_num_groups(0) - 1;
+    const int groupY = get_group_id(1);
+    const int localX = get_local_id(0);
+    const int localY = get_local_id(1);
+
+    volatile __global int *condCur = conds + (W >> LW_SHIFT) * groupY + groupX;
+    volatile __global int *condA = (groupX != 0) ? condCur - 1 : NULL;
+    volatile __global int *condB = NULL;
+    volatile __global int *condC = NULL;
+    volatile __global int *condD = NULL;
+    if (groupY != 0) {
+        condC = condCur - (W >> LW_SHIFT);
+        condB = (groupX != 0) ? condC - 1 : condC;
+        condD = (groupX != lastGroupX) ? condC + 1 : condC;
+    }
+
+    if (localX == 0 && localY == 0) {
+        if (condA) {
+            while (atomic_cmpxchg(condA, 1, 1) == 0)
+                ;
+        }
+        if (condB) {
+            while (atomic_cmpxchg(condB, 1, 1) == 0)
+                ;
+        }
+        if (condC) {
+            while (atomic_cmpxchg(condC, 1, 1) == 0)
+                ;
+        }
+        if (condD) {
+            while (atomic_cmpxchg(condD, 1, 1) == 0)
+                ;
+        }
+    }
+    barrier(0);
+#else
     /*const*/ int globalX = get_global_id(0);
     /*const*/ int globalY = get_global_id(1);
     //const int groupX = get_group_id(0);
@@ -45,6 +93,7 @@ __kernel void pred(
     if (groupX < 0 || groupX > lastGroupX) {
         return;
     }
+#endif
 
 
     __global uchar *pgroup = yPlane + W * LH * groupY + LW * groupX;
@@ -85,4 +134,13 @@ __kernel void pred(
 
     uchar value = (a0[localY] + b1c2c3d4[localX]) >> 1;
     yPlane[W * globalY + globalX] = value;
+
+#if SYNC_ON_DEV
+    // too slow!
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    if (localX == 0 && localY == 0) {
+        atomic_xchg(condCur, 1);
+    }
+#endif
 }

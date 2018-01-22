@@ -26,7 +26,8 @@
 __kernel void pred(
     __global uchar *yPlane,
 #if SYNC_ON_DEV
-    volatile __global int *conds
+    volatile __global int *conds,
+    const __global int *orders
 #else
     int xth,
     int offsetY
@@ -34,13 +35,16 @@ __kernel void pred(
 )
 {
 #if SYNC_ON_DEV
-    const int globalX = get_global_id(0);
-    const int globalY = get_global_id(1);
-    const int groupX = get_group_id(0);
     const int lastGroupX = get_num_groups(0) - 1;
-    const int groupY = get_group_id(1);
+
+    const int order = *(orders + (W >> LW_SHIFT) * get_group_id(1) + get_group_id(0));
+    const int groupY = order / (W >> LW_SHIFT);
+    const int groupX = order - (W >> LW_SHIFT) * groupY;
+
     const int localX = get_local_id(0);
     const int localY = get_local_id(1);
+    const int globalX = (groupX << LW_SHIFT) + localX;
+    const int globalY = (groupY << LH_SHIFT) + localY;
 
     volatile __global int *condCur = conds + (W >> LW_SHIFT) * groupY + groupX;
     volatile __global int *condA = (groupX != 0) ? condCur - 1 : NULL;
@@ -131,6 +135,7 @@ __kernel void pred(
     }
 
     barrier(CLK_LOCAL_MEM_FENCE);
+    //mem_fence(CLK_GLOBAL_MEM_FENCE|CLK_LOCAL_MEM_FENCE);
 
     uchar value = (a0[localY] + b1c2c3d4[localX]) >> 1;
     yPlane[W * globalY + globalX] = value;
@@ -138,8 +143,10 @@ __kernel void pred(
 #if SYNC_ON_DEV
     // too slow!
     barrier(CLK_GLOBAL_MEM_FENCE);
+    //mem_fence(CLK_GLOBAL_MEM_FENCE/*|CLK_LOCAL_MEM_FENCE*/);
 
     if (localX == 0 && localY == 0) {
+    //if (localX == (LW - 1) && localY == (LH - 1)) {
         atomic_xchg(condCur, 1);
     }
 #endif

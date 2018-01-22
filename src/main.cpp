@@ -171,7 +171,7 @@ int main(void)
         }
 
 #if SYNC_ON_DEV
-        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer>(program, kernelName);
+        auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer>(program, kernelName);
 #else
         auto kernelFunc = cl::KernelFunctor<cl::Buffer, int, int>(program, kernelName);
 #endif
@@ -184,6 +184,27 @@ int main(void)
         // Sync on Dev
         const size_t condsSize = sizeof(int32_t) * (W / 16) * (H / 16);
         cl::Buffer condsDev(CL_MEM_READ_WRITE, condsSize);
+
+        // diagonal order
+        int32_t orders[(W/16)*(H/16)];
+        // -> xth
+        // 0(0<<1): 0 1 2 3 4 5 6 7
+        // 1(1<<1):     2 3 4 5 6 7 8 9
+        // 2(2<<1):         4 5 6 7 8 9 10 11
+        size_t nx = W / 16 + ((H / 16 - 1) * 2);
+        size_t cur = 0;
+        for (size_t xth = 0; xth < nx; xth++) {
+            size_t offsetY = (xth < W / 16) ? 0 : (xth - W / 16) / 2 + 1;
+            size_t ny = (xth >> 1) + 1;
+            ny = (ny < H / 16) ? ny - offsetY : H / 16 - offsetY;
+
+            for (size_t groupY = offsetY; groupY < offsetY + ny; groupY++) {
+                size_t groupX = xth - (groupY << 1);
+                orders[cur++] = (W / 16) * groupY + groupX;
+            }
+        }
+        cl::Buffer ordersDev(CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR, condsSize, orders);
+
         const uint8_t patternZero = 0;
         err |= queue.enqueueFillBuffer(condsDev, patternZero, 0, condsSize, NULL, NULL);
         kernelFunc(
@@ -193,6 +214,7 @@ int main(void)
             ),
             yPlaneDev,
             condsDev,
+            ordersDev,
             err
         );
 #else
@@ -240,6 +262,7 @@ int main(void)
         err |= kernel.setArg(0, yPlaneDev);
 #if SYNC_ON_DEV
         err |= kernel.setArg(1, condsDev);
+        err |= kernel.setArg(2, ordersDev);
 #else
         err |= kernel.setArg(1, 0);
         err |= kernel.setArg(2, 0);

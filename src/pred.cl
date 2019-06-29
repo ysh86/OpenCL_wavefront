@@ -23,6 +23,10 @@
 #define LW_SHIFT 4
 #define LH_SHIFT 4
 
+#if __OPENCL_VERSION__ >= 200
+__global atomic_int conds2_0[(W >> LW_SHIFT)*(H >> LH_SHIFT)];
+#endif
+
 __kernel void pred(
     __global uchar *yPlane,
 #if SYNC_ON_DEV
@@ -46,6 +50,38 @@ __kernel void pred(
     const int globalX = (groupX << LW_SHIFT) + localX;
     const int globalY = (groupY << LH_SHIFT) + localY;
 
+#if __OPENCL_VERSION__ >= 200
+    __global atomic_int *condCur = conds2_0 + (W >> LW_SHIFT) * groupY + groupX;
+    __global atomic_int *condA = (groupX != 0) ? condCur - 1 : NULL;
+    __global atomic_int *condB = NULL;
+    __global atomic_int *condC = NULL;
+    __global atomic_int *condD = NULL;
+    if (groupY != 0) {
+        condC = condCur - (W >> LW_SHIFT);
+        condB = (groupX != 0) ? condC - 1 : condC;
+        condD = (groupX != lastGroupX) ? condC + 1 : condC;
+    }
+
+    if (localX == 0 && localY == 0) {
+        if (condA) {
+            while (atomic_load_explicit(condA, memory_order_acquire, memory_scope_device) == 0)
+                ;
+        }
+        if (condB) {
+            while (atomic_load_explicit(condB, memory_order_acquire, memory_scope_device) == 0)
+                ;
+        }
+        if (condC) {
+            while (atomic_load_explicit(condC, memory_order_acquire, memory_scope_device) == 0)
+                ;
+        }
+        if (condD) {
+            while (atomic_load_explicit(condD, memory_order_acquire, memory_scope_device) == 0)
+                ;
+        }
+    }
+    work_group_barrier(0);
+#else
     volatile __global int *condCur = conds + (W >> LW_SHIFT) * groupY + groupX;
     volatile __global int *condA = (groupX != 0) ? condCur - 1 : NULL;
     volatile __global int *condB = NULL;
@@ -76,6 +112,7 @@ __kernel void pred(
         }
     }
     barrier(0);
+#endif
 #else
     /*const*/ int globalX = get_global_id(0);
     /*const*/ int globalY = get_global_id(1);
@@ -134,13 +171,26 @@ __kernel void pred(
         }
     }
 
+#if __OPENCL_VERSION__ >= 200
+    work_group_barrier(CLK_LOCAL_MEM_FENCE);
+#else
     barrier(CLK_LOCAL_MEM_FENCE);
     //mem_fence(CLK_GLOBAL_MEM_FENCE|CLK_LOCAL_MEM_FENCE);
+#endif
 
     uchar value = (a0[localY] + b1c2c3d4[localX]) >> 1;
     yPlane[W * globalY + globalX] = value;
 
 #if SYNC_ON_DEV
+#if __OPENCL_VERSION__ >= 200
+    // too slow!
+    work_group_barrier(CLK_GLOBAL_MEM_FENCE);
+
+    if (localX == 0 && localY == 0) {
+        //if (localX == (LW - 1) && localY == (LH - 1)) {
+        atomic_store_explicit(condCur, 1, memory_order_release, memory_scope_device);
+    }
+#else
     // too slow!
     barrier(CLK_GLOBAL_MEM_FENCE);
     //mem_fence(CLK_GLOBAL_MEM_FENCE/*|CLK_LOCAL_MEM_FENCE*/);
@@ -149,5 +199,6 @@ __kernel void pred(
     //if (localX == (LW - 1) && localY == (LH - 1)) {
         atomic_xchg(condCur, 1);
     }
+#endif
 #endif
 }

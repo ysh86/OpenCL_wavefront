@@ -149,7 +149,11 @@ int main(void)
         cl::Program::Sources sources {kernelStr};
         cl::Program program = cl::Program(context, sources);
         try {
+#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+            err |= program.build("-cl-std=CL2.0");
+#else
             err |= program.build("");
+#endif
         } catch (cl::Error err) {
             std::cerr
             << "ERROR: "

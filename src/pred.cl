@@ -23,7 +23,7 @@
 #define LW_SHIFT 4
 #define LH_SHIFT 4
 
-#if __OPENCL_VERSION__ >= 200
+#if __OPENCL_C_VERSION__ >= 200
 __global atomic_int conds2_0[(W >> LW_SHIFT)*(H >> LH_SHIFT)];
 #endif
 
@@ -50,7 +50,7 @@ __kernel void pred(
     const int globalX = (groupX << LW_SHIFT) + localX;
     const int globalY = (groupY << LH_SHIFT) + localY;
 
-#if __OPENCL_VERSION__ >= 200
+#if __OPENCL_C_VERSION__ >= 200
     __global atomic_int *condCur = conds2_0 + (W >> LW_SHIFT) * groupY + groupX;
     __global atomic_int *condA = (groupX != 0) ? condCur - 1 : NULL;
     __global atomic_int *condB = NULL;
@@ -171,7 +171,7 @@ __kernel void pred(
         }
     }
 
-#if __OPENCL_VERSION__ >= 200
+#if __OPENCL_C_VERSION__ >= 200
     work_group_barrier(CLK_LOCAL_MEM_FENCE);
 #else
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -182,7 +182,7 @@ __kernel void pred(
     yPlane[W * globalY + globalX] = value;
 
 #if SYNC_ON_DEV
-#if __OPENCL_VERSION__ >= 200
+#if __OPENCL_C_VERSION__ >= 200
     // too slow!
     work_group_barrier(CLK_GLOBAL_MEM_FENCE);
 

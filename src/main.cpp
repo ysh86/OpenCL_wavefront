@@ -57,7 +57,7 @@ int main(void)
 {
     cl_int err = CL_SUCCESS;
     try {
-        // Platforms & Context
+        // Platforms
         // --------------------------------------------
         std::cout << "=======================================" << std::endl;
         std::cout << "Platforms" << std::endl;
@@ -84,22 +84,18 @@ int main(void)
         }
         std::cout << std::endl;
 
-        cl::Platform plat = cl::Platform::setDefault(platforms[PLATFORM_INDEX]);
-        if (plat != platforms[PLATFORM_INDEX]) {
-            std::cerr << "ERROR: Setting default platform: " << PLATFORM_INDEX << std::endl;
-            return EXIT_FAILURE;
-        }
+        cl::Platform &plat = platforms[PLATFORM_INDEX];
         std::cout << "Use platform " << PLATFORM_INDEX << std::endl;
         std::cout << std::endl;
-        // Context
-        cl::Context context = cl::Context::getDefault();
 
-        // Devices
+
+        // Devices & Context
         // --------------------------------------------
         std::cout << "=======================================" << std::endl;
         std::cout << "Devices" << std::endl;
         std::cout << "=======================================" << std::endl;
-        auto devices = context.getInfo<CL_CONTEXT_DEVICES>();
+        std::vector<cl::Device> devices;
+        err |= plat.getDevices(CL_DEVICE_TYPE_ALL, &devices);
         size_t i = 0;
         for (auto &device : devices) {
             std::cout << "--------------------" << std::endl;
@@ -130,7 +126,19 @@ int main(void)
             }
             ++i;
         }
+        if (devices.size() == 0) {
+            std::cout << "ERROR: No devices" << std::endl;
+            return EXIT_FAILURE;
+        }
         std::cout << std::endl;
+
+        i = 0;
+        cl::Device &device = devices[i];
+        std::cout << "Use device " << i << std::endl;
+        std::cout << std::endl;
+        // Context
+        cl::Context context(device);
+
 
         // Build
         // --------------------------------------------
@@ -139,7 +147,7 @@ int main(void)
                                std::istreambuf_iterator<char>());
         from.close();
         cl::Program::Sources sources {kernelStr};
-        cl::Program program = cl::Program(sources);
+        cl::Program program = cl::Program(context, sources);
         try {
             err |= program.build("");
         } catch (cl::Error err) {
@@ -162,13 +170,9 @@ int main(void)
         // Execution
         // --------------------------------------------
         cl::CommandQueue queue(
+            context,
             cl::QueueProperties::Profiling //cl::QueueProperties::None
         );
-        cl::CommandQueue q = cl::CommandQueue::setDefault(queue);
-        if (q != queue) {
-            std::cerr << "ERROR: Setting default queue" << std::endl;
-            return EXIT_FAILURE;
-        }
 
 #if SYNC_ON_DEV
         auto kernelFunc = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer>(program, kernelName);
@@ -176,14 +180,14 @@ int main(void)
         auto kernelFunc = cl::KernelFunctor<cl::Buffer, int, int>(program, kernelName);
 #endif
         auto kernel = kernelFunc.getKernel();
-        size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(cl::Device::getDefault());
+        size_t s = kernel.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(device);
         std::cout << "CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: " << s << std::endl;
 
-        cl::Buffer yPlaneDev(CL_MEM_READ_WRITE, W * H);
+        cl::Buffer yPlaneDev(context, CL_MEM_READ_WRITE, W * H);
 #if SYNC_ON_DEV
         // Sync on Dev
         const size_t condsSize = sizeof(int32_t) * (W / 16) * (H / 16);
-        cl::Buffer condsDev(CL_MEM_READ_WRITE, condsSize);
+        cl::Buffer condsDev(context, CL_MEM_READ_WRITE, condsSize);
 
         // diagonal order
         int32_t orders[(W/16)*(H/16)];
@@ -203,12 +207,13 @@ int main(void)
                 orders[cur++] = (W / 16) * groupY + groupX;
             }
         }
-        cl::Buffer ordersDev(CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR, condsSize, orders);
+        cl::Buffer ordersDev(context, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR, condsSize, orders);
 
         const uint8_t patternZero = 0;
         err |= queue.enqueueFillBuffer(condsDev, patternZero, 0, condsSize, NULL, NULL);
         kernelFunc(
             cl::EnqueueArgs(
+                queue,
                 kernelRangeGlobal,
                 kernelRangeLocal
             ),
@@ -231,6 +236,7 @@ int main(void)
             kernelRangeGlobal.get()[1] = ny * 16;
             kernelFunc(
                 cl::EnqueueArgs(
+                    queue,
                     kernelRangeGlobal,
                     kernelRangeLocal
                 ),
@@ -241,11 +247,11 @@ int main(void)
             );
         }
 #endif
-        cl::finish();
+        queue.finish();
         // dump
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
-            err |= cl::copy(yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
 
             const auto file = DUMP_FILE + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
             std::ofstream dump(file, std::ios::binary);
@@ -277,7 +283,7 @@ int main(void)
                 NULL
             );
         }
-        cl::finish();
+        queue.finish();
 
         // use cl::Kernel for performance!
         cl::Event eventStart;
@@ -342,7 +348,7 @@ int main(void)
         // --------------------------------------------
         {
             auto yPlane = std::make_shared<std::vector<uint8_t>>(W * H);
-            err |= cl::copy(yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
+            err |= cl::copy(queue, yPlaneDev, yPlane->data(), yPlane->data() + yPlane->size());
 
             const auto file = DUMP_FILE1000 + "_" + std::to_string(W) + "x" + std::to_string(H) + DUMP_FILE_EXT;
             std::ofstream dump(file, std::ios::binary);

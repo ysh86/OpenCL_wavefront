@@ -18,9 +18,22 @@ CXXFLAGS += -Wall -Werror --std=c++11 -O3 -msse2
 
 # libs
 
+# OS
+WSLENV ?= notwsl
+
 # OpenCL
-CPPFLAGS += -I$(HOME)/SDKs/OpenCL-CLHPP/build/include
-LDFLAGS += -framework opencl
+CPPFLAGS += -I$(HOME)/SDKs/OpenCL-Headers -I$(HOME)/SDKs/OpenCL-CLHPP/build/include
+ifndef WSLENV
+	TARGET_EXEC := $(TARGET_EXEC).exe
+	AS  := x86_64-w64-mingw32-as
+	CC  := x86_64-w64-mingw32-gcc-posix
+	CXX := x86_64-w64-mingw32-g++-posix
+	#CPPFLAGS += -I$(HOME)/SDKs/mingw-std-threads
+	#CXXFLAGS += -O0
+	LDFLAGS += /mnt/c/Windows/System32/OpenCL.DLL -static -lstdc++ -lgcc -lwinpthread
+else
+	LDFLAGS += -framework opencl
+endif
 
 # OpenCV, glm
 ###CPPFLAGS += `pkg-config --cflags opencv glm`

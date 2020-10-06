@@ -1,4 +1,4 @@
-#if 1
+#if 0
 #define CL_HPP_TARGET_OPENCL_VERSION 120
 #define CL_HPP_MINIMUM_OPENCL_VERSION 120
 #define SYNC_ON_DEV 1
@@ -29,11 +29,7 @@ namespace cl {
 #include <fstream>
 #include <streambuf>
 
-#if CL_HPP_TARGET_OPENCL_VERSION >= 200
-static const size_t PLATFORM_INDEX = 1;
-#else
 static const size_t PLATFORM_INDEX = 0;
-#endif
 
 static const size_t W = 1024;
 static const size_t H = 1024;

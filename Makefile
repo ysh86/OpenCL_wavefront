@@ -18,12 +18,9 @@ CXXFLAGS += -Wall -Werror --std=c++11 -O3 -msse2
 
 # libs
 
-# OS
-WSLENV ?= notwsl
-
 # OpenCL
-CPPFLAGS += -I$(HOME)/SDKs/OpenCL-Headers -I$(HOME)/SDKs/OpenCL-CLHPP/build/include
-ifndef WSLENV
+CPPFLAGS += -I$(HOME)/SDKs/OpenCL-Headers -I$(HOME)/SDKs/OpenCL-CLHPP/include
+ifdef WSL_DISTRO_NAME
 	TARGET_EXEC := $(TARGET_EXEC).exe
 	AS  := x86_64-w64-mingw32-as
 	CC  := x86_64-w64-mingw32-gcc-posix

@@ -150,7 +150,7 @@ int main(void)
 #else
             err |= program.build("");
 #endif
-        } catch (cl::Error err) {
+        } catch (cl::Error &err) {
             std::cerr
             << "ERROR: "
             << err.what()
@@ -359,7 +359,7 @@ int main(void)
             dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
         }
     }
-    catch (cl::Error err) {
+    catch (cl::Error &err) {
         std::cerr
         << "ERROR: "
         << err.what()

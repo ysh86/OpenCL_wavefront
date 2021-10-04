@@ -3,11 +3,11 @@ TARGET_EXEC ?= predcl
 BUILD_DIR ?= ./build
 SRC_DIRS ?= ./src
 
-SRCS := $(shell find $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
+SRCS := $(shell find -L $(SRC_DIRS) -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 
-INC_DIRS := $(shell find $(SRC_DIRS) -type d)
+INC_DIRS := $(shell find -L $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
 CPPFLAGS ?= $(INC_FLAGS) -MMD -MP
@@ -38,7 +38,7 @@ endif
 
 # ipp
 ###CPPFLAGS += -I$(HOME)/SDKs/ipp/include
-###LDFLAGS += -L$(HOME)/SDKs/ipp/lib -lippcore -lippcc -lippi -lipps
+###LDFLAGS += -no-pie -L$(HOME)/SDKs/ipp/lib -lippi -lipps -lippcc -lippcore
 
 
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)

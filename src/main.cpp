@@ -1,4 +1,4 @@
-#if 1
+#if 0
 #define CL_HPP_TARGET_OPENCL_VERSION 120
 #define CL_HPP_MINIMUM_OPENCL_VERSION 120
 #define SYNC_ON_DEV 1
@@ -29,11 +29,7 @@ namespace cl {
 #include <fstream>
 #include <streambuf>
 
-#if CL_HPP_TARGET_OPENCL_VERSION >= 200
-static const size_t PLATFORM_INDEX = 1;
-#else
 static const size_t PLATFORM_INDEX = 0;
-#endif
 
 static const size_t W = 1024;
 static const size_t H = 1024;
@@ -149,8 +145,12 @@ int main(void)
         cl::Program::Sources sources {kernelStr};
         cl::Program program = cl::Program(context, sources);
         try {
+#if CL_HPP_TARGET_OPENCL_VERSION >= 200
+            err |= program.build("-cl-std=CL2.0");
+#else
             err |= program.build("");
-        } catch (cl::Error err) {
+#endif
+        } catch (cl::Error &err) {
             std::cerr
             << "ERROR: "
             << err.what()
@@ -359,7 +359,7 @@ int main(void)
             dump.write(reinterpret_cast<char*>(yPlane->data()), (W / 2) * (H / 2));
         }
     }
-    catch (cl::Error err) {
+    catch (cl::Error &err) {
         std::cerr
         << "ERROR: "
         << err.what()
